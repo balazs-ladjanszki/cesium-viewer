@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Cesium Example</title>
+
+  <!-- CesiumJS CSS -->
+  <link href="./Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+
+  <!-- CesiumJS Script -->
+  <script src="./Build/Cesium/Cesium.js"></script>
+
+  <!-- Custom Styles -->
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #loadingOverlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(42, 42, 42, 0.8);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      font-size: 2em;
+    }
+
+    #toolbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(42, 42, 42, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 20;
+    }
+
+    #toolbar button {
+      margin: 5px;
+      padding: 5px 10px;
+      background: #444;
+      color: white;
+      border: none;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+
+    #toolbar button:hover {
+      background: #666;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="cesiumContainer"></div>
+  <div id="loadingOverlay">
+    <h1>Loading...</h1>
+  </div>
+  <div id="toolbar">
+    <button onclick="Corvin()">Corvin</button>
+    <button onclick="Moricz()">Moricz</button>
+    <button id="selectImageBtn">Choose Image</button>
+    <input type="file" id="fileInput" accept="image/*" style="display:none;">
+  </div>
+
+  <script type="module">
+
+    let clientActivationEnabled = true;
+    let messageFromSparcl = undefined;
+
+    import {
+      CesiumWidget, Terrain, createGooglePhotorealistic3DTileset,
+      Math, Cartesian2, Cartesian3, HeadingPitchRoll, Transforms, Matrix4,
+      ParticleSystem, CircleEmitter, ParticleBurst, ConeEmitter, Color,
+      ClockRange, JulianDate, PolygonHierarchy, Ion
+    } from "./Build/Cesium/index.js";
+
+    import { sendRequest, validateRequest, GeoPoseRequest } from '@oarc/gpp-access';
+    import { ImageOrientation, IMAGEFORMAT, CameraParam, CAMERAMODEL } from '@oarc/gpp-access';
+    import { Client } from '@stomp/stompjs';
+
+    const selectBtn = document.getElementById('selectImageBtn');
+    const fileInput = document.getElementById('fileInput');
+    const output = document.getElementById('base64Output');
+
+    const client = new Client({
+      brokerURL: 'ws://your.rabbitmq.host:15674/ws',
+      connectHeaders: {
+        login: 'guest',
+        passcode: 'guest'
+      },
+      debug: str => console.log('STOMP:', str),
+      onConnect: () => {
+        console.log('Connected!');
+
+        client.subscribe('/queue/your-queue-name', message => {
+          messageFromSparcl = message.body;
+        });
+      },
+      onStompError: frame => {
+        console.error('STOMP error:', frame.headers['message']);
+        console.error('Details:', frame.body);
+      }
+    });
+
+    if(clientActivationEnabled){
+      clientActivationEnabled = false;
+      //client.activate();
+    }
+    selectBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const img = new Image();
+      const reader = new FileReader();
+
+      reader.onload = function (e) {
+        img.onload = function () {
+          const width = img.width;
+          const height = img.height;
+          console.log("Width: ", width, "Height: ", height);
+          const base64Image = e.target.result;
+
+          /*let cameraParams = new CameraParam();
+          cameraParams.model = CAMERAMODEL.PINHOLE;
+          cameraParams.modelParams = [cameraIntrinsics.fx, cameraIntrinsics.fx, cameraIntrinsics.cx, cameraIntrinsics.cy];
+
+          const geoPoseRequest = new GeoPoseRequest(uuidv4())
+            .addCameraData(IMAGEFORMAT.JPG, [width, height], base64Image.split(',')[1], 0, new ImageOrientation(false, 0), cameraParams)
+            .addLocationData(latAngle, lonAngle, 0, 0, 0, 0, 0)
+
+          sendRequest(`${serviceUrl}`, JSON.stringify(geoPoseRequest))
+            .then(data => {
+              const respone = data.json;
+            })*/
+        };
+        img.src = e.target.result;
+      };
+
+      reader.readAsDataURL(file);
+    });
+
+    // Replace this with your actual Cesium Ion access token
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI0ZGIyMGE3NC03NmUxLTRlNjQtYTE3Ny1mNzQwOGI0YTM1NzgiLCJpZCI6Mjk0MDAxLCJpYXQiOjE3NDQ2Mzk3ODR9.K68s7FUXRHCwRn8L4UZQFQHzDfO3RmikQmRcDbgY6Jo';
+
+    const viewer = new CesiumWidget("cesiumContainer", {
+      globe: false,
+      // shadows: true,
+      shouldAnimate: true,
+    });
+
+    async function getTileset() {
+      try {
+        let googleTileset = await createGooglePhotorealistic3DTileset({
+          onlyUsingWithGoogleGeocoder: true,
+        });
+        viewer.scene.primitives.add(googleTileset);
+        document.getElementById("loadingOverlay").style.display = "none";
+      } catch (error) { alert(`Error loading 3D Tiles tileset: ${error}`); }
+    }
+
+
+    async function getAccurateHeight(lon, lat) {
+      const position = Cesium.Cartographic.fromDegrees(lon, lat);
+
+      // This returns a promise — resolves to a Cartographic with updated height
+      const updatedPosition = await viewer.scene.sampleHeightMostDetailed(position);
+
+      return updatedPosition.height;
+    }
+
+    getTileset();
+    viewer.scene.skyAtmosphere.show = true;
+
+    async function callAPI(lat, lng, keyword) {
+      let url = 'https://esoptron.hu:8043/locations?lat=' + lat + '&lng=' + lng + '&textQuery=' + keyword;
+      console.log(url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      console.log(data);
+
+      return data.features;
+    }
+    function flyToImagePose(lat, lon, height, head, pitch, roll){
+      viewer.scene.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          lat,
+          lon,
+          height
+        ),
+        orientation: new Cesium.HeadingPitchRoll(
+          head,
+          pitch,
+          roll
+        ),
+        duration: 2,
+      })
+    }
+    // View Locations
+    async function Corvin(duration = 2) {
+
+      //const place = await callAPI(47.485843084151384, 19.076113817393416, "restaurant");
+
+      viewer.scene.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          19.07915834721865,
+          47.485848440399394,
+          300
+        ),
+        orientation: new Cesium.HeadingPitchRoll(
+          4.71,
+          -0.49459905591668996,
+          0
+        ),
+        duration: duration,
+      });
+
+
+      let places = await callAPI(47.4857017, 19.0773234, 'restaurant');
+      if (places) {
+        for (const place of places) {
+          const lon = place.geometry.coordinates[1];
+          const lat = place.geometry.coordinates[0];
+
+          const pin = viewer.entities.add({
+            name: 'mapPin',
+            model: { uri: './models/pin.glb' },
+            position: Cesium.Cartesian3.fromDegrees(lon, lat, 180)
+          });
+        }
+      }
+
+    }
+
+    async function Moricz(duration = 2) {
+      viewer.scene.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          19.044429799048846,
+          47.47749819582731,
+          300
+        ),
+        orientation: new Cesium.HeadingPitchRoll(
+          1.5,
+          -0.49459905591668996,
+          0
+        ),
+        duration: duration,
+      });
+
+      let places = await callAPI(47.4778009451017, 19.047478679924613, 'restaurant');
+      if (places) {
+        for (const place of places) {
+          const lon = place.geometry.coordinates[1];
+          const lat = place.geometry.coordinates[0];
+
+          const pin = viewer.entities.add({
+            name: 'mapPin',
+            model: { uri: './models/pin.glb' },
+            position: Cesium.Cartesian3.fromDegrees(lon, lat, 175)
+          });
+        }
+      }
+
+    }
+
+    Corvin(0);
+    window.Corvin = Corvin;
+    window.Moricz = Moricz;
+  </script>
+
+</body>
+</html>
