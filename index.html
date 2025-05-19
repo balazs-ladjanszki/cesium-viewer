@@ -92,6 +92,7 @@
     import { sendRequest, validateRequest, GeoPoseRequest } from '@oarc/gpp-access';
     import { ImageOrientation, IMAGEFORMAT, CameraParam, CAMERAMODEL } from '@oarc/gpp-access';
     import { Client } from '@stomp/stompjs';
+    import ExifReader from 'exifreader';
 
     const selectBtn = document.getElementById('selectImageBtn');
     const fileInput = document.getElementById('fileInput');
@@ -138,6 +139,12 @@
           const height = img.height;
           console.log("Width: ", width, "Height: ", height);
           const base64Image = e.target.result;
+          ExifReader.load(file || url, {async: true}).then(function (tags) {
+            let focalLength = tags['FocalLength'].value[0]/tags['FocalLength'].value[1];
+            let FullFrameEq = tags['FocalLengthIn35mmFilm'].value;
+            console.log(focalLength, FullFrameEq);
+            //delete tags['MakerNote'];
+          })
 
           /*let cameraParams = new CameraParam();
           cameraParams.model = CAMERAMODEL.PINHOLE;

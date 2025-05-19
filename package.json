@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@oarc/gpp-access": "^0.2.1",
-    "@stomp/stompjs": "^7.1.1"
+    "@stomp/stompjs": "^7.1.1",
+    "exifreader": "^4.30.1"
   }
 }
