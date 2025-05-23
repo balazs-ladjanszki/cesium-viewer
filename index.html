@@ -76,40 +76,49 @@
     <button id="selectImageBtn">Choose Image</button>
     <input type="file" id="fileInput" accept="image/*" style="display:none;">
   </div>
-
+  <canvas id="canvas"></canvas>
   <script type="module">
 
     let clientActivationEnabled = true;
     let messageFromSparcl = undefined;
-
+    let duck;
+    let firstTime = true;
+    /*{"agent_id":"afd403d0-af55-4e4b-92b3-b42e42313437","avatar":{"name":"gabor","color":{"r":255,"g":195,"b":0,"a":1}},
+    "geopose":{"position":{"lat":47.485999471925005,"lon":19.074004728695737,"h":1.2694832496345043},
+    "quaternion":{"x":0.12061287462711334,"y":0.6238247156143188,"z":-0.08465176075696945,"w":0.767547607421875}},"timestamp":1747658972982}*/
+    import { v4 as uuidv4 } from 'uuid';
     import {
       CesiumWidget, Terrain, createGooglePhotorealistic3DTileset,
       Math, Cartesian2, Cartesian3, HeadingPitchRoll, Transforms, Matrix4,
       ParticleSystem, CircleEmitter, ParticleBurst, ConeEmitter, Color,
       ClockRange, JulianDate, PolygonHierarchy, Ion
     } from "./Build/Cesium/index.js";
-
-    import { sendRequest, validateRequest, GeoPoseRequest } from '@oarc/gpp-access';
-    import { ImageOrientation, IMAGEFORMAT, CameraParam, CAMERAMODEL } from '@oarc/gpp-access';
+    import {
+      sendRequest, validateRequest, GeoPoseRequest, Sensor, Privacy,
+      ImageOrientation, IMAGEFORMAT, CameraParam, CAMERAMODEL, SENSORTYPE
+    } from '@oarc/gpp-access';
     import { Client } from '@stomp/stompjs';
     import ExifReader from 'exifreader';
+    import qte from 'quaternion-to-euler';
 
     const selectBtn = document.getElementById('selectImageBtn');
     const fileInput = document.getElementById('fileInput');
     const output = document.getElementById('base64Output');
 
-    const client = new Client({
-      brokerURL: 'ws://your.rabbitmq.host:15674/ws',
+    //esoptron.hu:8034 sparcl, 47.486, 19.074 1.5, rabbitmq-ra csatlakozni
+    const client = new Client({ //TODO: username, password, url field
+      brokerURL: 'https://esoptron.hu:8024/ws',
       connectHeaders: {
-        login: 'guest',
-        passcode: 'guest'
+        login: 'rmquser',
+        passcode: 'rmqpassword'
       },
       debug: str => console.log('STOMP:', str),
       onConnect: () => {
         console.log('Connected!');
 
-        client.subscribe('/queue/your-queue-name', message => {
+        client.subscribe('/exchange/esoptron/geopose_update.#', message => {
           messageFromSparcl = message.body;
+          updatePosition();
         });
       },
       onStompError: frame => {
@@ -118,9 +127,9 @@
       }
     });
 
-    if(clientActivationEnabled){
+    if (clientActivationEnabled) {
       clientActivationEnabled = false;
-      //client.activate();
+      client.activate();
     }
     selectBtn.addEventListener('click', () => {
       fileInput.click();
@@ -132,32 +141,66 @@
 
       const img = new Image();
       const reader = new FileReader();
+      const canvas = document.createElement('canvas');
+
 
       reader.onload = function (e) {
-        img.onload = function () {
+        img.onload = async function () {
           const width = img.width;
           const height = img.height;
-          console.log("Width: ", width, "Height: ", height);
           const base64Image = e.target.result;
-          ExifReader.load(file || url, {async: true}).then(function (tags) {
-            let focalLength = tags['FocalLength'].value[0]/tags['FocalLength'].value[1];
-            let FullFrameEq = tags['FocalLengthIn35mmFilm'].value;
-            console.log(focalLength, FullFrameEq);
-            //delete tags['MakerNote'];
-          })
+          
+          //Maintaining aspect ratio
+          const aspectRatio = width / height;
+          const targetHeight = 1024;
+          const targetWidth = 1024 * aspectRatio;
+          
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+          
+          try{
+          const base64String = canvas.toDataURL('image/jpeg');
+          const intrinsics = await getCameraIntrinsics(file, targetWidth, targetHeight);
 
-          /*let cameraParams = new CameraParam();
+          let cameraParams = new CameraParam();
           cameraParams.model = CAMERAMODEL.PINHOLE;
-          cameraParams.modelParams = [cameraIntrinsics.fx, cameraIntrinsics.fx, cameraIntrinsics.cx, cameraIntrinsics.cy];
-
+          cameraParams.modelParams = [intrinsics.fx, intrinsics.fy, intrinsics.cx, intrinsics.cy];
+          //47.48594998402779, 19.07915002326063
           const geoPoseRequest = new GeoPoseRequest(uuidv4())
-            .addCameraData(IMAGEFORMAT.JPG, [width, height], base64Image.split(',')[1], 0, new ImageOrientation(false, 0), cameraParams)
-            .addLocationData(latAngle, lonAngle, 0, 0, 0, 0, 0)
+            .addSensor(new Sensor("gps", SENSORTYPE.geolocation))
+            .addGeoLocationData(47.4859499, 19.07915002, 0, 0, 0, 0, 0,
+              new Date().getTime(), "gps", new Privacy());
 
-          sendRequest(`${serviceUrl}`, JSON.stringify(geoPoseRequest))
+          console.log(JSON.stringify(geoPoseRequest))
+
+          geoPoseRequest
+            .addSensor(new Sensor("cam", SENSORTYPE.camera))
+            .addCameraData(IMAGEFORMAT.JPG, [width, height], base64String.split(',')[1], 0, new ImageOrientation(false, 0), cameraParams,
+              new Date().getTime(), "cam", new Privacy())
+
+
+          sendRequest(`https://oarcvps.duckdns.org:8046/localize/geopose`, JSON.stringify(geoPoseRequest))
             .then(data => {
-              const respone = data.json;
-            })*/
+              try {
+                console.log(data);
+                const lat = data.geopose.position.lat;
+                const lon = data.geopose.position.lon;
+                const height = 160;
+                const x = data.geopose.quaternion.x;
+                const y = data.geopose.quaternion.y;
+                const z = data.geopose.quaternion.z;
+                const w = data.geopose.quaternion.w;
+                flyToImagePose(lat, lon, height, x, y, z, w);
+              }
+              catch { console.log("could not parse") }
+            })
+          }
+          catch{
+            console.log("Could not get intrinsics");
+          }
+
         };
         img.src = e.target.result;
       };
@@ -174,6 +217,45 @@
       shouldAnimate: true,
     });
 
+    async function getCameraIntrinsics(file, width, height) {
+      const ratio = width / height;
+      let sensorWidth;
+      let sensorHeight;
+      let focalLength;
+      if (ratio >= 1) {
+        sensorWidth = 35;
+        sensorHeight = 35 / ratio;
+      }
+      else {
+        sensorHeight = 35;
+        sensorWidth = 35 * ratio;
+      }
+      try {
+        await ExifReader.load(file || url, { async: true }).then(function (tags) {
+          focalLength = tags["FocalLengthIn35mmFilm"].value;
+          console.log(tags);
+        })
+
+        const fx = (focalLength / sensorWidth) * width;
+        const fy = (focalLength / sensorHeight) * height;
+        const cx = width / 2;
+        const cy = height / 2;
+
+        const intrinsics = {
+          fx: fx,
+          fy: fy,
+          cx: cx,
+          cy: cy
+        }
+
+        return intrinsics;
+
+      }
+      catch {
+        console.log("Could not get Focal length");
+      }
+
+    }
     async function getTileset() {
       try {
         let googleTileset = await createGooglePhotorealistic3DTileset({
@@ -212,18 +294,18 @@
 
       return data.features;
     }
-    function flyToImagePose(lat, lon, height, head, pitch, roll){
+    function flyToImagePose(lat, lon, height, x, y, z, w) {
+      let quaternion = new Cesium.Quaternion(x, y, z, w);
+      let cameraOrientation = Cesium.HeadingPitchRoll.fromQuaternion(quaternion);
+      cameraOrientation.heading += 1.5707963267948966192;
       viewer.scene.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(
-          lat,
           lon,
+          lat,
           height
         ),
-        orientation: new Cesium.HeadingPitchRoll(
-          head,
-          pitch,
-          roll
-        ),
+        //orientation: cameraOrientation,
+        orientation: cameraOrientation,
         duration: 2,
       })
     }
@@ -293,11 +375,47 @@
       }
 
     }
+    /*{"agent_id":"afd403d0-af55-4e4b-92b3-b42e42313437","avatar":{"name":"gabor","color":{"r":255,"g":195,"b":0,"a":1}},
+"geopose":{"position":{"lat":47.485999471925005,"lon":19.074004728695737,"h":1.2694832496345043},
+"quaternion":{"x":0.12061287462711334,"y":0.6238247156143188,"z":-0.08465176075696945,"w":0.767547607421875}},"timestamp":1747658972982}*/
+    function updatePosition() {
+      if (firstTime) {
+        firstTime = false;
+        const lat = messageFromSparcl.geopose.position.lat;
+        const lon = messageFromSparcl.geopose.position.lon;
+        const height = messageFromSparcl.geopose.position.h;
+        const x = messageFromSparcl.geopose.position.x;
+        const y = messageFromSparcl.geopose.position.y;
+        const z = messageFromSparcl.geopose.position.z;
+        const w = messageFromSparcl.geopose.position.w;
+        const degrees = qte([x, y, z, w]);
 
+        duck = viewer.entities.add({
+          name: 'duck',
+          model: { uri: './models/Duck.glb' },
+          position: Cesium.Cartesian3.fromDegrees(lon, lat, 175),
+          orientation: Cesium.HeadingPitchRoll(degrees[0], degrees[1], degrees[2])
+        });
+      }
+      else {
+        const lat = messageFromSparcl.geopose.position.lat;
+        const lon = messageFromSparcl.geopose.position.lon;
+        const height = messageFromSparcl.geopose.position.h+175;
+        const x = messageFromSparcl.geopose.position.x;
+        const y = messageFromSparcl.geopose.position.y;
+        const z = messageFromSparcl.geopose.position.z;
+        const w = messageFromSparcl.geopose.position.w;
+        const degrees = qte([x, y, z, w]);
+        console.log(lat, lon, height);
+        duck.position = Cesium.Cartesian3.fromDegrees(lon, lat, 175);
+        duck.orientation = Cesium.HeadingPitchRoll(degrees[0], degrees[1], degrees[2]);
+      }
+    }
     Corvin(0);
     window.Corvin = Corvin;
     window.Moricz = Moricz;
   </script>
 
 </body>
+
 </html>
