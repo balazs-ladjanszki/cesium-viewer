@@ -48,6 +48,17 @@
       z-index: 20;
     }
 
+    #toolbar1 {
+      position: absolute;
+      top: 90px;
+      left: 10px;
+      background: rgba(42, 42, 42, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 20;
+      color: aliceblue;
+    }
+
     #toolbar button {
       margin: 5px;
       padding: 5px 10px;
@@ -59,6 +70,19 @@
     }
 
     #toolbar button:hover {
+      background: #666;
+    }
+    #toolbar1 button {
+      margin: 5px;
+      padding: 5px 10px;
+      background: #444;
+      color: white;
+      border: none;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+
+    #toolbar1 button:hover {
       background: #666;
     }
   </style>
@@ -73,12 +97,17 @@
   <div id="toolbar">
     <button onclick="Corvin()">Corvin</button>
     <button onclick="Moricz()">Moricz</button>
-    <button id="selectImageBtn">Choose Image</button>
     <input type="file" id="fileInput" accept="image/*" style="display:none;">
     <input type="text" placeholder="user" id="rmquser">
-    <input type="text" placeholder="password" id="rmqpassword">
+    <input type="password" placeholder="password" id="rmqpassword">
     <input type="text" placeholder="url" id="rmqurl">
+    <input type="text" placeholder="subscribe" id="rmqsub">
     <button onclick="connectRMQ()">Connect</button>
+  </div>
+  <div id="toolbar1">
+    <button id="selectImageBtn">Choose Image</button>
+    <input type="text" placeholder="VPS URL" id="vpsurl">
+    <div id="statusText"></div>
   </div>
   <canvas id="canvas"></canvas>
   <script type="module">
@@ -86,10 +115,8 @@
     let clientActivationEnabled = true;
     let messageFromSparcl = undefined;
     let duck;
-    let firstTime = true;
-    /*{"agent_id":"afd403d0-af55-4e4b-92b3-b42e42313437","avatar":{"name":"gabor","color":{"r":255,"g":195,"b":0,"a":1}},
-    "geopose":{"position":{"lat":47.485999471925005,"lon":19.074004728695737,"h":1.2694832496345043},
-    "quaternion":{"x":0.12061287462711334,"y":0.6238247156143188,"z":-0.08465176075696945,"w":0.767547607421875}},"timestamp":1747658972982}*/
+    let rmqClient;
+
     import { v4 as uuidv4 } from 'uuid';
     import {
       CesiumWidget, Terrain, createGooglePhotorealistic3DTileset,
@@ -109,8 +136,7 @@
     const fileInput = document.getElementById('fileInput');
     const output = document.getElementById('base64Output');
 
-    //esoptron.hu:8034 sparcl, 47.486, 19.074 1.5, rabbitmq-ra csatlakozni
-    const client = new Client({ //TODO: username, password, url field
+    const client = new Client({
       brokerURL: 'https://esoptron.hu:8024/ws',
       connectHeaders: {
         login: 'rmquser',
@@ -123,47 +149,6 @@
         client.subscribe('/exchange/esoptron/geopose_update.#', message => {
           const RMQmessage = JSON.parse(message.body);
           updatePosition(RMQmessage);
-          /*const lat = messageFromSparcl.geopose.position.lat;
-          const lon = messageFromSparcl.geopose.position.lon;
-          const height = messageFromSparcl.geopose.position.h + 175;
-          const x = messageFromSparcl.geopose.quaternion.x;
-          const y = messageFromSparcl.geopose.quaternion.y;
-          const z = messageFromSparcl.geopose.quaternion.z;
-          const w = messageFromSparcl.geopose.quaternion.w;
-
-          let quaternion = new Cesium.Quaternion(x, y, z, w);
-          const matrixFromCustomToENU = Cesium.Matrix3.fromArray([
-            0, 1, 0, // X_custom → Y_ENU
-            -1, 0, 0, // Y_custom → X_ENU
-            0, 0, 1  // Z_custom → Z_ENU
-          ]);
-
-          const R = Cesium.Quaternion.fromRotationMatrix(matrixFromCustomToENU);
-          const R_inv = Cesium.Quaternion.inverse(R, new Cesium.Quaternion());
-
-          const temp = Cesium.Quaternion.multiply(R, quaternion, new Cesium.Quaternion());
-          const qEnu = Cesium.Quaternion.multiply(temp, R_inv, new Cesium.Quaternion());
-
-
-          /*0.8845714, -0.2463586,  0.3960314;
-          0.4479427,  0.6852799, -0.5742289;
-          -0.1299262,  0.6853458,  0.7165335
-
-          const adjusmentMatrix = Cesium.Matrix3.fromArray([
-            0.8845714, -0.2463586, 0.3960314,
-            0.4479427, 0.6852799, -0.5742289,
-            -0.1299262, 0.6853458, 0.7165335
-          ]);
-          const adjustmentQuaternion = Cesium.Quaternion.fromRotationMatrix(adjusmentMatrix);
-          const adjustmentQuaternionInv = Cesium.Quaternion.inverse(adjustmentQuaternion, new Cesium.Quaternion());
-          const temp2 = Cesium.Quaternion.multiply(adjusmentMatrix, qEnu, new Cesium.Quaternion());
-          const adjustedQuaternion = Cesium.Quaternion.multiply(temp, adjustmentQuaternionInv, new Cesium.Quaternion());
-
-
-          axes.position = Cesium.Cartesian3.fromDegrees(lon, lat, 175);
-          axes.orientation = qEnu;*/
-
-          //updatePosition();
         });
       },
       onStompError: frame => {
@@ -172,10 +157,34 @@
       }
     });
 
+    function connectRMQ() {
+      rmqClient = new Client({
+        brokerURL: document.getElementById("rmqurl").value,
+        connectHeaders: {
+          login: document.getElementById("rmquser").value,
+          passcode: document.getElementById("rmqpassword").value
+        },
+        debug: str => console.log('STOMP:', str),
+        onConnect: () => {
+          console.log('Connected!');
+
+          rmqClient.subscribe(document.getElementById("rmqsub").value, message => {
+            const RMQmessage = JSON.parse(message.body);
+            updatePosition(RMQmessage);
+          });
+        },
+        onStompError: frame => {
+          console.error('STOMP error:', frame.headers['message']);
+          console.error('Details:', frame.body);
+        }
+      });
+      rmqClient.activate();
+    }
+
     if (clientActivationEnabled) {
       clientActivationEnabled = false;
       //createClient();
-      client.activate();
+      //client.activate();
     }
     selectBtn.addEventListener('click', () => {
       fileInput.click();
@@ -213,35 +222,42 @@
             let cameraParams = new CameraParam();
             cameraParams.model = CAMERAMODEL.PINHOLE;
             cameraParams.modelParams = [intrinsics.fx, intrinsics.fy, intrinsics.cx, intrinsics.cy];
-            //47.48594998402779, 19.07915002326063
-            const geoPoseRequest = new GeoPoseRequest(uuidv4())
-              .addSensor(new Sensor("gps", SENSORTYPE.geolocation))
-              .addGeoLocationData(47.4859499, 19.07915002, 0, 0, 0, 0, 0,
-                new Date().getTime(), "gps", new Privacy());
-
-            console.log(JSON.stringify(geoPoseRequest))
+            fileInput.value = '';
+            const geoPoseRequest = new GeoPoseRequest(uuidv4());
 
             geoPoseRequest
               .addSensor(new Sensor("cam", SENSORTYPE.camera))
               .addCameraData(IMAGEFORMAT.JPG, [width, height], base64String.split(',')[1], 0, new ImageOrientation(false, 0), cameraParams,
                 new Date().getTime(), "cam", new Privacy())
-
-
-            sendRequest(`https://oarcvps.duckdns.org:8046/localize/geopose`, JSON.stringify(geoPoseRequest))
+              //https://oarcvps.duckdns.org:8046/localize/geopose
+            sendRequest(document.getElementById("vpsurl").value, JSON.stringify(geoPoseRequest))
               .then(data => {
                 try {
                   console.log(data);
+                  const statusDiv = document.getElementById("statusText"); 
                   const lat = data.geopose.position.lat;
                   const lon = data.geopose.position.lon;
-                  const height = 160;
+                  const height = data.geopose.position.h;
                   const x = data.geopose.quaternion.x;
                   const y = data.geopose.quaternion.y;
                   const z = data.geopose.quaternion.z;
                   const w = data.geopose.quaternion.w;
+                  const orientation = Cesium.HeadingPitchRoll.fromQuaternion(new Cesium.Quaternion(x,y,z,w));
+                  const heading = Cesium.Math.toDegrees(orientation.heading);
+                  const pitch = Cesium.Math.toDegrees(orientation.pitch);
+                  const roll = Cesium.Math.toDegrees(orientation.roll)
+
+                  statusDiv.textContent = `Latitude: ${lat.toFixed(5)}, Longitude: ${lon.toFixed(5)}, Height: ${height.toFixed(2)} m, Heading: ${heading.toFixed(2)}°, Pitch: ${pitch.toFixed(2)}°, Roll: ${roll.toFixed(2)}°`;
                   flyToImagePose(lat, lon, height, x, y, z, w);
                 }
-                catch { console.log("could not parse") }
-              })
+                catch { 
+                  console.log("could not parse");
+                }
+              }).catch(err => {
+              console.log("Wrong VPS address or VPS error");
+              const statusDiv = document.getElementById("statusText"); 
+              statusDiv.textContent = 'Wrong VPS address or VPS error';
+            })
           }
           catch {
             console.log("Could not get intrinsics");
@@ -262,19 +278,7 @@
       // shadows: true,
       shouldAnimate: true,
     });
-
-
-    duck = viewer.entities.add({
-      name: 'duck',
-      model: { uri: './models/duck.glb' },
-      position: Cesium.Cartesian3.fromDegrees(19.076908891140043, 47.48584827874827, 175),
-    });
-
-    let axes = viewer.entities.add({
-      name: 'axes',
-      model: { uri: './models/axes.glb' },
-      position: Cesium.Cartesian3.fromDegrees(19.076908891140043, 47.48584827874827, 175),
-    });
+    viewer.camera.frustum.fov = Cesium.Math.toRadians(110);
 
     async function getCameraIntrinsics(file, width, height) {
       const ratio = width / height;
@@ -365,7 +369,7 @@
         ),
         //orientation: cameraOrientation,
         orientation: cameraOrientation,
-        duration: 2,
+        duration: 3,
       })
     }
     // View Locations
@@ -375,12 +379,12 @@
 
       viewer.scene.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(
-          19.07915834721865,
-          47.485848440399394,
-          300
+          19.07942624,
+          47.4849770,
+          200
         ),
         orientation: new Cesium.HeadingPitchRoll(
-          4.71,
+          0,
           -0.49459905591668996,
           0
         ),
@@ -388,19 +392,20 @@
       });
 
 
-      /*let places = await callAPI(47.4857017, 19.0773234, 'restaurant');
+      let places = await callAPI(47.4857017, 19.0773234, 'restaurant');
       if (places) {
         for (const place of places) {
           const lon = place.geometry.coordinates[1];
           const lat = place.geometry.coordinates[0];
 
-          const pin = viewer.entities.add({
+          let pin = viewer.entities.add({
             name: 'mapPin',
             model: { uri: './models/pin.glb' },
-            position: Cesium.Cartesian3.fromDegrees(lon, lat, 180)
+            position: Cesium.Cartesian3.fromDegrees(lon, lat, 2)
           });
+          pin.model.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND
         }
-      }*/
+      }
 
     }
 
@@ -425,26 +430,54 @@
           const lon = place.geometry.coordinates[1];
           const lat = place.geometry.coordinates[0];
 
-          const pin = viewer.entities.add({
+          let pin = viewer.entities.add({
             name: 'mapPin',
             model: { uri: './models/pin.glb' },
-            position: Cesium.Cartesian3.fromDegrees(lon, lat, 175)
+            position: Cesium.Cartesian3.fromDegrees(lon, lat, 2)
           });
+          pin.model.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND
         }
       }
 
     }
+    let agents = [];
+
+    function checkAgents(){
+      for(let i = agents.length - 1; i >= 0; i--){
+        let startTime = agents[i].time;
+        let endTime = new Date().getTime();
+        if(endTime - startTime > 5000){
+          removeEntityWithName(agents[i].name);
+          agents.splice(i,1);
+        }
+      }
+    }
+
+    function updateAgentTime(name){
+      for(let i = 0; i < agents.length; i++){
+        if(agents[i].name === name){
+          agents[i].time = new Date().getTime();
+        }
+      }
+    }
 
     function CreateEntityWithName(entityName, lon, lat, height) {
+
+      const heading = Cesium.Math.toRadians(0);
+      const pitch = 0;
+      const roll = 0;
+      const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
+      const orientation = Cesium.Transforms.headingPitchRollQuaternion(Cesium.Cartesian3.fromDegrees(lon, lat, height), hpr);
+
+
       let axes = viewer.entities.add({
         name: entityName,
         model: { uri: './models/axes.glb' },
-        position: Cesium.Cartesian3.fromDegrees(lon, lat, 175)
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+        orientation: orientation
       });
 
-      const deletion = setTimeout(() => {
-        removeEntityWithName(entityName);
-      }, 10000);
+      axes.model.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND;
     }
 
     function removeEntityWithName(entityName) {
@@ -474,49 +507,41 @@
 
       for (let i = 0; i < entities.length; i++) {
         if (entities[i].name === entityName) {
+          updateAgentTime(entityName);
+          // ---------------------------------
+          // GeoPose camera orientation:
+          // X forward to East, Y left to North, Z up to up, and identity looking to East
+          // Cesium orientation
+          // X right to East, Y to North, Z up, and identity looking to North
+          //DO NOT TOUCH-------------------------------------------------------------------------------------------
+          const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+          let quatCam = new Cesium.Quaternion(x, y, z, w);
+          const quatZm90 = new Cesium.Quaternion(0, 0, -0.7071068, 0.7071068); // -90 degrees rotation around Z axis
+          let quatCesium = new Cesium.Quaternion();
 
+          Cesium.Quaternion.multiply(quatCam, quatZm90, quatCesium);
+          const hpr = Cesium.HeadingPitchRoll.fromQuaternion(quatCesium);
+          const quatENU = Transforms.headingPitchRollQuaternion(position, hpr);
 
-          let quaternion = new Cesium.Quaternion(x, y, z, w);
-          const matrixFromCustomToENU = Cesium.Matrix3.fromArray([
-            0, 1, 0, // X_custom → Y_ENU
-            -1, 0, 0, // Y_custom → X_ENU
-            0, 0, 1  // Z_custom → Z_ENU
-          ]);
-
-          const R = Cesium.Quaternion.fromRotationMatrix(matrixFromCustomToENU);
-          const R_inv = Cesium.Quaternion.inverse(R, new Cesium.Quaternion());
-
-          const temp = Cesium.Quaternion.multiply(R, quaternion, new Cesium.Quaternion());
-          const qEnu = Cesium.Quaternion.multiply(temp, R_inv, new Cesium.Quaternion());
-
-
-          /*0.8845714, -0.2463586,  0.3960314;
-          0.4479427,  0.6852799, -0.5742289;
-          -0.1299262,  0.6853458,  0.7165335*/
-
-          const adjusmentMatrix = Cesium.Matrix3.fromArray([
-            0.8845714, -0.2463586, 0.3960314,
-            0.4479427, 0.6852799, -0.5742289,
-            -0.1299262, 0.6853458, 0.7165335
-          ]);
-          const adjustmentQuaternion = Cesium.Quaternion.fromRotationMatrix(adjusmentMatrix);
-          const adjustmentQuaternionInv = Cesium.Quaternion.inverse(adjustmentQuaternion, new Cesium.Quaternion());
-          const temp2 = Cesium.Quaternion.multiply(adjusmentMatrix, qEnu, new Cesium.Quaternion());
-          const adjustedQuaternion = Cesium.Quaternion.multiply(temp, adjustmentQuaternionInv, new Cesium.Quaternion());
-
-
-          entities[i].position = Cesium.Cartesian3.fromDegrees(lon, lat, 175);
-          entities[i].orientation = qEnu;
-
+          entities[i].position = position;
+          entities[i].orientation = quatENU;
+          entities[i].model.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND;
+          //----------------------------------------------------------------------------------------------------------
           return;
         }
       }
-      CreateEntityWithName(entityName, lon, lat, height + 170)
+      agents.push({
+        name: entityName,
+        time: new Date().getTime()
+      })
+      CreateEntityWithName(entityName, lon, lat, height)
 
     }
+    setInterval(checkAgents,1000);
     Corvin(0);
     window.Corvin = Corvin;
     window.Moricz = Moricz;
+    window.connectRMQ = connectRMQ;
   </script>
 
 </body>
