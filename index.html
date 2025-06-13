@@ -86,6 +86,75 @@
     #toolbar1 button:hover {
       background: #666;
     }
+
+    #toolbar2 {
+      color:white;
+      position: absolute;
+      top: 160px;
+      left: 10px;
+      background: rgba(42, 42, 42, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 20;
+    }
+    #toolbar2 button {
+      margin: 5px;
+      padding: 5px 10px;
+      background: #444;
+      color: white;
+      border: none;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+
+    #toolbar2 button:hover {
+      background: #666;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+
+    input:checked+.slider {
+      background-color: #2196F3;
+    }
+
+    input:checked+.slider:before {
+      transform: translateX(26px);
+    }
   </style>
 </head>
 
@@ -103,20 +172,46 @@
     <input type="password" placeholder="password" id="rmqpassword">
     <input type="text" placeholder="url" id="rmqurl">
     <input type="text" placeholder="subscribe" id="rmqsub">
+    <input type="number" placeholder="height" id="rmqheight">
     <button onclick="connectRMQ()">Connect</button>
+    <label class="switch">
+      <input type="checkbox" id="toggleSwitch">
+      <span class="slider round"></span>
+    </label>
+    <span id="toggleLabel" style="margin-left: 10px; font-family: sans-serif; color: rgb(255, 255, 255); padding:10px;">
+      Creative Mode
+    </span>
+    <input type="text" placeholder="RMQ Send" id="rmqsend">
   </div>
   <div id="toolbar1">
     <button id="selectImageBtn">Choose Image</button>
     <input type="text" placeholder="VPS URL" id="vpsurl">
+    <input type="number" placeholder="height" id="vpsheight">
+    <span id="vpsLabel" style="margin-left: 10px; font-family: sans-serif; color: rgb(255, 255, 255); padding:10px;">
+      Ground Level (m)
+    </span>
     <div id="statusText"></div>
+  </div>
+
+  <div id = "toolbar2">
+    <input type="text" placeholder="POI URL" id="poiurl">
+    <input type="text" placeholder="Query" id="query">
+    <button onclick="searchForPOIS()">Search</button>
+    <div id="poiSearchText"></div>
   </div>
   <canvas id="canvas"></canvas>
   <script type="module">
 
+    let CreativeModeEnabled = false;
     let clientActivationEnabled = true;
     let messageFromSparcl = undefined;
     let duck;
     let rmqClient;
+    let PoiText = document.getElementById("poiSearchText");
+    PoiText.textContent = `Chosen coordinates: Lat: 0, Lon: 0, Height: 0`;
+    let poiLat = 0;
+    let poiLon = 0;
+    let poiHeight = 0;
 
     import { v4 as uuidv4 } from 'uuid';
     import {
@@ -204,7 +299,6 @@
               .addSensor(new Sensor("cam", SENSORTYPE.camera))
               .addCameraData(IMAGEFORMAT.JPG, [width, height], base64String.split(',')[1], 0, new ImageOrientation(false, 0), cameraParams,
                 new Date().getTime(), "cam", new Privacy())
-            //https://oarcvps.duckdns.org:8046/localize/geopose
             sendRequest(document.getElementById("vpsurl").value, JSON.stringify(geoPoseRequest))
               .then(data => {
                 try {
@@ -212,7 +306,7 @@
                   const statusDiv = document.getElementById("statusText");
                   const lat = data.geopose.position.lat;
                   const lon = data.geopose.position.lon;
-                  const height = data.geopose.position.h;
+                  let height = data.geopose.position.h;
                   const x = data.geopose.quaternion.x;
                   const y = data.geopose.quaternion.y;
                   const z = data.geopose.quaternion.z;
@@ -221,9 +315,11 @@
                   const heading = Cesium.Math.toDegrees(orientation.heading);
                   const pitch = Cesium.Math.toDegrees(orientation.pitch);
                   const roll = Cesium.Math.toDegrees(orientation.roll)
+                  let givenHeight = parseFloat(document.getElementById("vpsheight").value) + parseFloat(height);
+                  console.log(givenHeight);
 
                   statusDiv.textContent = `Latitude: ${lat.toFixed(5)}, Longitude: ${lon.toFixed(5)}, Height: ${height.toFixed(2)} m, Heading: ${heading.toFixed(2)}°, Pitch: ${pitch.toFixed(2)}°, Roll: ${roll.toFixed(2)}°`;
-                  flyToImagePose(lat, lon, height, x, y, z, w);
+                  flyToImagePose(lat, lon, givenHeight, x, y, z, w);
                 }
                 catch {
                   console.log("could not parse");
@@ -257,6 +353,11 @@
     });
     viewer.camera.frustum.fov = Cesium.Math.toRadians(110);
 
+
+    document.getElementById('toggleSwitch').addEventListener('change', function () {
+      CreativeModeEnabled = this.checked;
+    });
+
     async function getCameraIntrinsics(file, width, height) {
       const ratio = width / height;
       let sensorWidth;
@@ -273,7 +374,6 @@
       try {
         await ExifReader.load(file || url, { async: true }).then(function (tags) {
           focalLength = tags["FocalLengthIn35mmFilm"].value;
-          console.log(tags);
         })
 
         const fx = (focalLength / sensorWidth) * width;
@@ -306,11 +406,65 @@
       } catch (error) { alert(`Error loading 3D Tiles tileset: ${error}`); }
     }
 
+
+    // Set up mouse click handler
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+
+    handler.setInputAction(function (click) {
+      const pickedPosition = viewer.scene.pickPosition(click.position);
+      const cartographic = Cesium.Cartographic.fromCartesian(pickedPosition);
+      const lat = Cesium.Math.toDegrees(cartographic.latitude);
+      const lon = Cesium.Math.toDegrees(cartographic.longitude);
+      const height = cartographic.height;
+      const statusDiv = document.getElementById("poiSearchText")
+      statusDiv.textContent = `Chosen coordinates: Lat: ${lat.toFixed(5)}, Lon: ${lon.toFixed(5)}, Height: ${height.toFixed(2)}`;
+      poiLat = lat;
+      poiLon = lon;
+      poiHeight = height;
+
+      if (Cesium.defined(pickedPosition)) {
+        if (CreativeModeEnabled) {
+          removeEntityWithName("mapPinCreative");
+          if (agents.length > 0) {
+            rmqClient.publish({
+              destination: document.getElementById("rmqsend").value, // like "/queue/agent_positions"
+              body: JSON.stringify({
+                active: true,
+                creator_id: "Cesium",
+                agent_id: agents[0].name,
+                geopose: {
+                  position: {
+                    lat: lat, lon: lon, h: 0
+                  },
+                  quaternion: {
+                    x: 0, y: 0, z: 0, w: 1
+                  }
+                }
+              })
+            });
+            console.log("Message sent.");
+          }
+          viewer.entities.add({
+            name: "mapPinCreative",
+            position: Cesium.Cartesian3.fromDegrees(lon, lat, 2),
+            model: {
+              uri: './models/pin.glb',
+              heightReference: Cesium.HeightReference.RELATIVE_TO_3D_TILE,
+            }
+          });
+
+          console.log(`Clicked position:\nLatitude: ${lat}\nLongitude: ${lon}\nHeight: ${height}`);
+        }
+      } else {
+        console.warn("No surface picked — try clicking on a visible 3D surface.");
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
     await getTileset();
     viewer.scene.skyAtmosphere.show = true;
 
-    async function callAPI(lat, lng, keyword) {
-      let url = 'https://esoptron.hu:8043/locations?lat=' + lat + '&lng=' + lng + '&textQuery=' + keyword;
+    async function callAPI(poiUrl, lat, lng, keyword) {
+      let url = poiUrl + '?lat=' + lat + '&lng=' + lng + '&textQuery=' + keyword;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -318,8 +472,6 @@
       }
 
       const data = await response.json();
-
-      console.log(data);
 
       return data.features;
     }
@@ -339,27 +491,13 @@
       })
     }
 
-    // View Locations
-    async function Corvin(duration = 2) {
+    async function searchForPOIS(){
       removeEntityWithName("mapPin");
-      //const place = await callAPI(47.485843084151384, 19.076113817393416, "restaurant");
+      let url = document.getElementById("poiurl").value;
+      let query = document.getElementById("query").value;
+      try{
+      let places = await callAPI(url,poiLat,poiLon,query);
 
-      viewer.scene.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(
-          19.07942624,
-          47.4849770,
-          200
-        ),
-        orientation: new Cesium.HeadingPitchRoll(
-          0,
-          -0.49459905591668996,
-          0
-        ),
-        duration: duration,
-      });
-
-
-      let places = await callAPI(47.4857017, 19.0773234, 'restaurant');
       if (places) {
         for (const place of places) {
           const lon = place.geometry.coordinates[1];
@@ -375,7 +513,31 @@
           });
         }
       }
+    }
+    catch{
+      console.log("Error calling API");
+    }
 
+    }
+
+    // View Locations
+    async function Corvin(duration = 2) {
+      removeEntityWithName("mapPin");
+      //const place = await callAPI(47.485843084151384, 19.076113817393416, "restaurant");
+
+      viewer.scene.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          19.07942624,
+          47.4849770,
+          170
+        ),
+        orientation: new Cesium.HeadingPitchRoll(
+          0,
+          -0.49459905591668996,
+          0
+        ),
+        duration: duration,
+      });
     }
 
     async function Moricz(duration = 2) {
@@ -393,34 +555,19 @@
         ),
         duration: duration,
       });
-
-      let places = await callAPI(47.4778009451017, 19.047478679924613, 'restaurant');
-      if (places) {
-        for (const place of places) {
-          const lon = place.geometry.coordinates[1];
-          const lat = place.geometry.coordinates[0];
-
-          let pin = viewer.entities.add({
-            name: 'mapPin',
-            model: { uri: './models/pin.glb' },
-            position: Cesium.Cartesian3.fromDegrees(lon, lat, 2)
-          });
-          pin.model.heightReference = Cesium.HeightReference.RELATIVE_TO_3D_TILE;
-        }
-      }
-
     }
     let agents = [];
     let spherePositions = {};
 
     function checkAgents() {
-      console.log(agents)
       for (let i = agents.length - 1; i >= 0; i--) {
         let startTime = agents[i].time;
         let endTime = new Date().getTime();
         if (endTime - startTime > 5000) {
           removeEntityWithName(agents[i].name);
           removeEntityWithName(agents[i].name + "sphere");
+          removeEntityWithName(agents[i].name + "label");
+          delete spherePositions[agents[i].name + "sphere"];
           agents.splice(i, 1);
         }
       }
@@ -434,16 +581,8 @@
       }
     }
 
-    let sphere = viewer.entities.add({
-        name: "sphere",
-        position: Cesium.Cartesian3.fromDegrees(19.079401673, 47.4860041, 2),
-        ellipsoid: {
-          radii: new Cesium.Cartesian3(3, 3, 3),
-          material: Cesium.Color.fromBytes(200, 50, 200, 255),
-        },
-        heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
-      })
-    function CreateEntityWithName(entityName, lon, lat, height, rgb) {
+
+    function CreateEntityWithName(entityName, lon, lat, height, rgb, name) {
 
       const heading = Cesium.Math.toRadians(0);
       const pitch = 0;
@@ -469,17 +608,32 @@
           return spherePositions[entityName + "sphere"];
         }, false),
         ellipsoid: {
-          radii: new Cesium.Cartesian3(3, 3, 3),
+          radii: new Cesium.Cartesian3(0.7, 0.7, 0.7),
           material: Cesium.Color.fromBytes(rgb.r, rgb.g, rgb.b, 255),
           heightReference: Cesium.HeightReference.NONE
         },
       })
+
+      let label = viewer.entities.add({
+        name: entityName + "label",
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, height + 2),
+        label: {
+          text: name,
+          font: '14pt sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          heightReference: Cesium.HeightReference.RELATIVE_TO_3D_TILE,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY, // ensures label is always visible
+        }
+      });
     }
 
     function removeEntityWithName(entityName) {
       const entities = viewer.entities.values;
 
-      for (let i = 0; i < entities.length; i++) {
+      for (let i = entities.length-1; i >=0; i--) {
         if (entities[i].name === entityName) {
           viewer.entities.remove(entities[i]);
         }
@@ -487,99 +641,103 @@
     }
 
     function getTileHeightFromLatLon(lon, lat) {
-  const canvas = viewer.scene.canvas;
+      const canvas = viewer.scene.canvas;
+      // Convert lat/lon to screen coordinates (approximation)
+      const cartesian = Cesium.Cartesian3.fromDegrees(lon, lat);
+      const screenPosition = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, cartesian);
+      if (screenPosition) {
+        // Get the intersection with the Google tileset mesh
+        const pickedPosition = viewer.scene.pickPosition(screenPosition);
 
-  // Convert lat/lon to screen coordinates (approximation)
-  const cartesian = Cesium.Cartesian3.fromDegrees(lon, lat);
-  if (viewer.scene && viewer.scene.camera) {
-    const screenPosition = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, cartesian);
-  }
-
-  // Get the intersection with the Google tileset mesh
-  const pickedPosition = viewer.scene.pickPosition(screenPosition);
-
-  if (Cesium.defined(pickedPosition)) {
-    const cartographic = Cesium.Cartographic.fromCartesian(pickedPosition);
-    return cartographic.height;
-  } else {
-    return null;
-  }
-}
+        if (Cesium.defined(pickedPosition)) {
+          const cartographic = Cesium.Cartographic.fromCartesian(pickedPosition);
+          return cartographic.height;
+        } else {
+          return null;
+        }
+      }
+    }
 
     function updateSphere(name, lon, lat, height) {
+      let sphereHeight = parseFloat(document.getElementById("rmqheight").value);
       const entities = viewer.entities.values;
       let position;
       let tileHeight = getTileHeightFromLatLon(lon, lat);
-      let newHeight = height + tileHeight;
+      let newHeight = height + tileHeight + 0.5;
       for (let i = 0; i < entities.length; i++) {
         if (entities[i].name === name) {
           const key = name;
-          const position = Cesium.Cartesian3.fromDegrees(lon, lat, newHeight);
-
-            if (spherePositions[key]) {
-              spherePositions[key] = position;
-            }
+          if (spherePositions[key]) {
+            spherePositions[key] = Cesium.Cartesian3.fromDegrees(lon, lat, sphereHeight);
           }
           return;
         }
       }
+    }
 
-      /*{"agent_id":"afd403d0-af55-4e4b-92b3-b42e42313437","avatar":{"name":"gabor","color":{"r":255,"g":195,"b":0,"a":1}},
-  "geopose":{"position":{"lat":47.485999471925005,"lon":19.074004728695737,"h":1.2694832496345043},
-  "quaternion":{"x":0.12061287462711334,"y":0.6238247156143188,"z":-0.08465176075696945,"w":0.767547607421875}},"timestamp":1747658972982}*/
-      function updatePosition(message) {
-        const entities = viewer.entities.values;
-        const entityName = message.agent_id;
-        const lat = message.geopose.position.lat;
-        const lon = message.geopose.position.lon;
-        const height = message.geopose.position.h;
-        const x = message.geopose.quaternion.x;
-        const y = message.geopose.quaternion.y;
-        const z = message.geopose.quaternion.z;
-        const w = message.geopose.quaternion.w;
-        const rgb = message.avatar.color;
+    function updateLabel(lon,lat,height, entityname){
+      const entities = viewer.entities.values;
+      for (let i = 0; i < entities.length; i++) {
+        if (entities[i].name === entityname) {
+          entities[i].position = Cesium.Cartesian3.fromDegrees(lon, lat, height + 5);
+        }}
+    }
 
-        for (let i = 0; i < entities.length; i++) {
-          console.log(entities[i].name);
+    function updatePosition(message) {
+      const entities = viewer.entities.values;
+      const entityName = message.agent_id;
+      const lat = message.geopose.position.lat;
+      const lon = message.geopose.position.lon;
+      const height = message.geopose.position.h;
+      const x = message.geopose.quaternion.x;
+      const y = message.geopose.quaternion.y;
+      const z = message.geopose.quaternion.z;
+      const w = message.geopose.quaternion.w;
+      const rgb = message.avatar.color;
+      const name = message.avatar.name;
 
-          if (entities[i].name === entityName) {
-            updateAgentTime(entityName);
-            updateSphere(entityName + "sphere", lon, lat, height);
-            // ---------------------------------
-            // GeoPose camera orientation:
-            // X forward to East, Y left to North, Z up to up, and identity looking to East
-            // Cesium orientation
-            // X right to East, Y to North, Z up, and identity looking to North
-            //DO NOT TOUCH-------------------------------------------------------------------------------------------
-            const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
-            let quatCam = new Cesium.Quaternion(x, y, z, w);
-            const quatZm90 = new Cesium.Quaternion(0, 0, -0.7071068, 0.7071068); // -90 degrees rotation around Z axis
-            let quatCesium = new Cesium.Quaternion();
+      for (let i = 0; i < entities.length; i++) {
 
-            Cesium.Quaternion.multiply(quatCam, quatZm90, quatCesium);
-            const hpr = Cesium.HeadingPitchRoll.fromQuaternion(quatCesium);
-            const quatENU = Transforms.headingPitchRollQuaternion(position, hpr);
+        if (entities[i].name === entityName) {
+          updateAgentTime(entityName);
+          updateSphere(entityName + "sphere", lon, lat, height);
+          updateLabel(lon,lat,height,entityName+"label");
+          // ---------------------------------
+          // GeoPose camera orientation:
+          // X forward to East, Y left to North, Z up to up, and identity looking to East
+          // Cesium orientation
+          // X right to East, Y to North, Z up, and identity looking to North
+          //-------------------------------------------------------------------------------------------
+          const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+          let quatCam = new Cesium.Quaternion(x, y, z, w);
+          const quatZm90 = new Cesium.Quaternion(0, 0, -0.7071068, 0.7071068); // -90 degrees rotation around Z axis
+          let quatCesium = new Cesium.Quaternion();
 
-            entities[i].position = position;
-            entities[i].orientation = quatENU;
-            entities[i].model.heightReference = Cesium.HeightReference.RELATIVE_TO_3D_TILE;
-            //----------------------------------------------------------------------------------------------------------
-            return;
-          }
+          Cesium.Quaternion.multiply(quatCam, quatZm90, quatCesium);
+          const hpr = Cesium.HeadingPitchRoll.fromQuaternion(quatCesium);
+          const quatENU = Transforms.headingPitchRollQuaternion(position, hpr);
+
+          entities[i].position = position;
+          entities[i].orientation = quatENU;
+          entities[i].model.heightReference = Cesium.HeightReference.RELATIVE_TO_3D_TILE;
+          //----------------------------------------------------------------------------------------------------------
+          return;
         }
-
-        agents.push({
-          name: entityName,
-          time: new Date().getTime()
-        })
-        CreateEntityWithName(entityName, lon, lat, height, rgb)
-
       }
-      setInterval(checkAgents, 1000);
-      Corvin(0);
-      window.Corvin = Corvin;
-      window.Moricz = Moricz;
-      window.connectRMQ = connectRMQ;
+
+      agents.push({
+        name: entityName,
+        time: new Date().getTime()
+      })
+      CreateEntityWithName(entityName, lon, lat, height, rgb, name)
+
+    }
+    setInterval(checkAgents, 1000);
+    Corvin(0);
+    window.Corvin = Corvin;
+    window.Moricz = Moricz;
+    window.connectRMQ = connectRMQ;
+    window.searchForPOIS = searchForPOIS;
   </script>
 
 </body>
