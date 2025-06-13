@@ -74,7 +74,7 @@ function createTaskProcessorWorker(workerFunction) {
 var createTaskProcessorWorker_default = createTaskProcessorWorker;
 
 // packages/engine/index.js
-globalThis.CESIUM_VERSION = "1.128";
+globalThis.CESIUM_VERSION = "1.130";
 
 // Specs/TestWorkers/returnNonCloneable.js
 var returnNonCloneable_default = createTaskProcessorWorker_default(function() {
