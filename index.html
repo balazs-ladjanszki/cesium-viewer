@@ -179,7 +179,7 @@
       <span class="slider round"></span>
     </label>
     <span id="toggleLabel" style="margin-left: 10px; font-family: sans-serif; color: rgb(255, 255, 255); padding:10px;">
-      Creative Mode
+      Send Waypoint
     </span>
     <input type="text" placeholder="RMQ Send" id="rmqsend">
   </div>
@@ -212,6 +212,11 @@
     let poiLat = 0;
     let poiLon = 0;
     let poiHeight = 0;
+
+    //TOKENS------------
+    const CesiumToken = '';
+    const tileID = 0;
+    //------------------
 
     import { v4 as uuidv4 } from 'uuid';
     import {
@@ -316,7 +321,9 @@
                   const pitch = Cesium.Math.toDegrees(orientation.pitch);
                   const roll = Cesium.Math.toDegrees(orientation.roll)
                   let givenHeight = parseFloat(document.getElementById("vpsheight").value) + parseFloat(height);
-                  console.log(givenHeight);
+                  if(!givenHeight){
+                    givenHeight = 0;
+                  }
 
                   statusDiv.textContent = `Latitude: ${lat.toFixed(5)}, Longitude: ${lon.toFixed(5)}, Height: ${height.toFixed(2)} m, Heading: ${heading.toFixed(2)}°, Pitch: ${pitch.toFixed(2)}°, Roll: ${roll.toFixed(2)}°`;
                   flyToImagePose(lat, lon, givenHeight, x, y, z, w);
@@ -342,7 +349,7 @@
     });
 
     // Replace this with your actual Cesium Ion access token
-    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI0ZGIyMGE3NC03NmUxLTRlNjQtYTE3Ny1mNzQwOGI0YTM1NzgiLCJpZCI6Mjk0MDAxLCJpYXQiOjE3NDQ2Mzk3ODR9.K68s7FUXRHCwRn8L4UZQFQHzDfO3RmikQmRcDbgY6Jo';
+    Cesium.Ion.defaultAccessToken = CesiumToken;
 
     const viewer = new Cesium.Viewer("cesiumContainer", {
       globe: false,
@@ -398,7 +405,7 @@
     }
     async function getTileset() {
       try {
-        const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207, {
+        const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(tileID, {
           enableCollision: true,
         });
         viewer.scene.primitives.add(tileset);
@@ -426,12 +433,13 @@
         if (CreativeModeEnabled) {
           removeEntityWithName("mapPinCreative");
           if (agents.length > 0) {
+            for(let i = 0; i < agents.length; i++){
             rmqClient.publish({
-              destination: document.getElementById("rmqsend").value, // like "/queue/agent_positions"
+              destination: document.getElementById("rmqsend").value,
               body: JSON.stringify({
                 active: true,
                 creator_id: "Cesium",
-                agent_id: agents[0].name,
+                agent_id: agents[i].name,
                 geopose: {
                   position: {
                     lat: lat, lon: lon, h: 0
@@ -443,6 +451,7 @@
               })
             });
             console.log("Message sent.");
+          }
           }
           viewer.entities.add({
             name: "mapPinCreative",
