@@ -11,8 +11,8 @@ RUN npm install
 # Copy rest of the files
 COPY . .
 
-# Expose the port Vite uses
-EXPOSE 5173
+# Expose the Vite dev server port
+EXPOSE 8044
 
-# Run Vite dev server
-CMD ["npm", "run", "dev", "--", "--host"]
+# Start Vite dev server with host and port
+CMD ["sh", "-c", "npm run dev -- --host --port 8044"]
